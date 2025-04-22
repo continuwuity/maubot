@@ -1,0 +1,8 @@
+id: org.continuwuity.bot
+version: 0.1.0
+license: Apache-2.0
+modules:
+- continuwuitybot
+main_class: ContinuwuityHelper
+extra_files:
+- base-config.yaml
