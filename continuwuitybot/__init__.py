@@ -1,5 +1,7 @@
 import asyncio
+import json
 from typing import Type
+from urllib.parse import quote
 
 import aiohttp
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
@@ -47,9 +49,12 @@ class ContinuwuityHelper(Plugin):
     def base_url(self):
         return self.forge.rstrip("/") + "/api/v1"
 
-    async def get_issue(self, n: int, repo: str = "continuwuation/continuwuity") -> dict | None | Exception:
+    async def get_issue(self, n: int, repo: str = "continuwuation/continuwuity", *, base_url: str | None = None) -> dict | None | Exception:
+        url = (base_url or self.base_url) + "/repos/%s/issues/%d" % (repo, n)
         try:
-            async with self.http.get(self.base_url + "/repos/%s/issues/%d" % (repo, n)) as resp:
+            self.log.info("-> GET %s", url)
+            async with self.http.get(url) as resp:
+                self.log.info("<- GET %s [%d %s]", url, resp.status, resp.reason)
                 resp.raise_for_status()
                 return await resp.json()
         except aiohttp.ClientResponseError as e:
@@ -57,7 +62,7 @@ class ContinuwuityHelper(Plugin):
                 return None
             return e
 
-    async def get_pull_request(self, n: int, repo: str = "continuwuation/continuwuity") -> dict | None | Exception:
+    async def get_pull_request(self, n: int, repo: str = "continuwuation/continuwuity", *, base_url: str | None = None) -> dict | None | Exception:
         """
         Get a pull request by number.
 
@@ -65,8 +70,11 @@ class ContinuwuityHelper(Plugin):
         :param repo: The repository to pull from. Defaults to "continuwuation/continuwuity"
         :return: The data, None if not found
         """
+        url = (base_url or self.base_url) + "/repos/%s/pulls/%d" % (repo, n)
         try:
-            async with self.http.get(self.base_url + "/repos/%s/pulls/%d" % (repo, n)) as resp:
+            self.log.info("-> GET %s", url)
+            async with self.http.get(base_url or self.base_url + "/repos/%s/pulls/%d" % (repo, n)) as resp:
+                self.log.info("<- GET %s [%d %s]", url, resp.status, resp.reason)
                 resp.raise_for_status()
                 return await resp.json()
         except aiohttp.ClientResponseError as e:
@@ -76,7 +84,7 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive(r"([a-zA-Z]+/)?([a-zA-Z]+)?[#!](\d+)", multiple=True)
     async def on_issue_number(self, evt: MessageEvent, matches: list[tuple[str]]):
-        await self.client.set_typing(evt.room_id, 30_000)
+        await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         t: list[asyncio.Task] = []
         async with asyncio.TaskGroup() as tg:
             for match_set in matches:
@@ -110,3 +118,43 @@ class ContinuwuityHelper(Plugin):
             return
         o = "\n".join(lines)
         await evt.reply(o, markdown=True, allow_html=False)
+
+    @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
+    async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
+        await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
+        lines = []
+        for match_set in matches:
+            m = list(match_set)
+            full = m.pop(0)
+            n = int(m.pop())
+
+            info = await self.get_issue(n, "matrix-org/matrix-spec-proposals", base_url="https://api.github.com")
+            if isinstance(info, Exception):
+                self.log.error("Error while fetching %s: %s", full, info, exc_info=info)
+                continue
+            if info is None:
+                lines.append(f"* `MSC{n:04d}`: not found")
+                continue
+            title = info.get("title", "(no title)")
+            if title.startswith("MSC"):
+                title = title.split(" ", 1)[1]
+            line = "* [MSC{0:04d}]({1[html_url]}) - {2} by [@{1[user][login]}]({1[user][html_url]})".format(
+                n, info, title
+            ).replace("<", "&lt;").replace(">", "&gt;")
+            labels = []
+            for label in info["labels"]:
+                url = (
+                    "https://github.com/matrix-org/matrix-spec-proposals/pulls?q=is%3Apr+is%3Aopen+label%3A"+
+                    quote(label["name"])
+                )
+                labels.append(
+                    f"[<span data-mx-color=\"#{label['color']}\">{label['name']}</span>]({url})"
+                )
+            if labels:
+                line += " (" + " ".join(labels) + ")"
+            lines.append(line)
+
+        if not lines:
+            return
+        o = "\n".join(lines)
+        await evt.reply(o, markdown=True, allow_html=True)
