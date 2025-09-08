@@ -1,0 +1,1 @@
+color-contrast, available at https://github.com/ZugBahnHof/color-contrast, uses the BSD-3-Clause license.

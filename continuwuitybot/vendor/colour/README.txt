@@ -1,0 +1,1 @@
+colour, available at https://github.com/vaab/colour, uses the BSD 2-Clause "Simplified" License.
