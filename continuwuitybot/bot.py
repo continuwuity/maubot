@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Type
 from urllib.parse import quote
 
@@ -31,11 +32,13 @@ class Config(BaseProxyConfig):
 
 
 class ContinuwuityHelper(Plugin):
-    cs: aiohttp.ClientSession | None = None
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.last_sent: dict[str, float] = {}
+        self.getter_lock = asyncio.Lock()
 
     async def start(self) -> None:
         self.config.load_and_update()
-        self.cs = aiohttp.ClientSession(base_url=self.forge)
 
     async def stop(self) -> None:
         pass
@@ -116,27 +119,44 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive(r"([a-zA-Z]+/)?([a-zA-Z]+)?[#!](\d+)", multiple=True)
     async def on_issue_number(self, evt: MessageEvent, matches: list[tuple[str]]):
+        now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         t: list[asyncio.Task] = []
-        async with asyncio.TaskGroup() as tg:
+        cache_set = set()
+        async with asyncio.TaskGroup() as tg, self.getter_lock:
+            to_get = set()
             for match_set in matches:
                 m = list(match_set)
-                full = m.pop(0)
+                m.pop(0)
                 org = m.pop(0) or self.main_org
                 # Trim trailing slash if present
                 if org.endswith("/"):
                     org = org[:-1]
                 repo = m.pop(0) or self.main_repo
                 n = int(m.pop(0))
+                if n in to_get:
+                    continue
+                to_get.add(n)
+                key = f"{evt.room_id};{org};{repo};{n}"
+                cache_set.add(key)
+
+                last_sent = self.last_sent.get(key, 0)
+                if now - last_sent < 60:
+                    self.log.info(
+                        "Ignoring request for %s/%s#%d as it was sent %.1fs ago", org, repo, n, now - last_sent
+                    )
+                    continue
                 self.log.info("Fetching issue %d from %s/%s", n, org, repo)
-                t.append(tg.create_task(self.get_issue(n, f"{org}/{repo}"), name=full))
+                t.append(tg.create_task(self.get_issue(n, f"{org}/{repo}"), name=key))
 
         lines = []
         for task in t:
             result = task.result()
             if result is None:
+                cache_set.remove(task.get_name())
                 continue
             elif isinstance(result, Exception):
+                cache_set.remove(task.get_name())
                 self.log.error("Error while fetching %s: %s", task.get_name(), result, exc_info=result)
                 continue
             line = (
@@ -167,53 +187,76 @@ class ContinuwuityHelper(Plugin):
             return
         o = "\n".join(lines)
         await evt.reply(o, markdown=True, allow_html=True)
+        for k in cache_set:
+            self.last_sent[k] = now
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
+        now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         lines = []
-        for match_set in matches:
-            m = list(match_set)
-            full = m.pop(0)
-            n = int(m.pop())
+        cache_set = set()
+        async with self.getter_lock:
+            to_get = set()
+            for match_set in matches:
+                m = list(match_set)
+                full = m.pop(0)
+                n = int(m.pop())
+                if n in to_get:
+                    continue
+                to_get.add(n)
+                cache_key = f"{evt.room_id};MSC;{n}"
+                last_sent = self.last_sent.get(cache_key, 0)
+                if now - last_sent < 60:
+                    self.log.info("Ignoring request for MSC%d as it was sent %.1fs ago", n, now - last_sent)
+                    continue
+                self.log.info("Fetching MSC %d", n)
 
-            info = await self.get_issue(n, "matrix-org/matrix-spec-proposals", base_url="https://api.github.com")
-            if isinstance(info, Exception):
-                self.log.error("Error while fetching %s: %s", full, info, exc_info=info)
-                continue
-            if info is None:
-                lines.append(f"* `MSC{n:04d}`: not found")
-                continue
-            title = info.get("title", "(no title)")
-            if title.startswith("MSC"):
-                title = title.split(" ", 1)[1]
-            line = (
-                "* [MSC{0:04d}]({1[html_url]}) - {2} by [@{1[user][login]}]({1[user][html_url]})".format(n, info, title)
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-            labels = []
-            for label in info["labels"]:
-                url = "https://github.com/matrix-org/matrix-spec-proposals/pulls?q=is%3Apr+is%3Aopen+label%3A" + quote(
-                    label["name"]
+                info = await self.get_issue(n, "matrix-org/matrix-spec-proposals", base_url="https://api.github.com")
+                if isinstance(info, Exception):
+                    self.log.error("Error while fetching %s: %s", full, info, exc_info=info)
+                    continue
+                if info is None:
+                    lines.append(f"* `MSC{n:04d}`: not found")
+                    continue
+                cache_set.add(cache_key)
+                title = info.get("title", "(no title)")
+                if title.startswith("MSC"):
+                    title = title.split(" ", 1)[1]
+                line = (
+                    "* [MSC{0:04d}]({1[html_url]}) - {2} by [@{1[user][login]}]({1[user][html_url]})".format(
+                        n, info, title
+                    )
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
                 )
-                fg, bg, ok = modulate_colour(
-                    "#" + label["color"], "#212830", level=AccessibilityLevel.AAA, mode=ModulationMode.FOREGROUND
-                )
-                if ok:
-                    self.log.debug("modulated #%s to %s on %s with success.", label["color"], fg.hex, bg.hex)
-                    fg = fg.hex
-                    bg = bg.hex
-                else:
-                    self.log.warning("failed to modulate #%s. Got %s and %s with fail.", label["color"], fg.hex, bg.hex)
-                    fg = "#" + label["color"]
-                    bg = "#000"
-                labels.append(f"[{colour_span(label['name'], fg=fg, bg=bg)}]({url})")
-            if labels:
-                line += " (" + " ".join(labels) + ")"
-            lines.append(line)
+                labels = []
+                for label in info["labels"]:
+                    url = (
+                        "https://github.com/matrix-org/matrix-spec-proposals/pulls?q=is%3Apr+is%3Aopen+label%3A"
+                        + quote(label["name"])
+                    )
+                    fg, bg, ok = modulate_colour(
+                        "#" + label["color"], "#212830", level=AccessibilityLevel.AAA, mode=ModulationMode.FOREGROUND
+                    )
+                    if ok:
+                        self.log.debug("modulated #%s to %s on %s with success.", label["color"], fg.hex, bg.hex)
+                        fg = fg.hex
+                        bg = bg.hex
+                    else:
+                        self.log.warning(
+                            "failed to modulate #%s. Got %s and %s with fail.", label["color"], fg.hex, bg.hex
+                        )
+                        fg = "#" + label["color"]
+                        bg = "#000"
+                    labels.append(f"[{colour_span(label['name'], fg=fg, bg=bg)}]({url})")
+                if labels:
+                    line += " (" + " ".join(labels) + ")"
+                lines.append(line)
 
         if not lines:
             return
         o = "\n".join(lines)
         await evt.reply(o, markdown=True, allow_html=True)
+        for k in cache_set:
+            self.last_sent[k] = now
