@@ -123,31 +123,33 @@ class ContinuwuityHelper(Plugin):
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         t: list[asyncio.Task] = []
         cache_set = set()
-        async with asyncio.TaskGroup() as tg, self.getter_lock:
-            to_get = set()
-            for match_set in matches:
-                m = list(match_set)
-                m.pop(0)
-                org = m.pop(0) or self.main_org
-                # Trim trailing slash if present
-                if org.endswith("/"):
-                    org = org[:-1]
-                repo = m.pop(0) or self.main_repo
-                n = int(m.pop(0))
-                if n in to_get:
-                    continue
-                to_get.add(n)
-                key = f"{evt.room_id};{org};{repo};{n}"
-                cache_set.add(key)
+        async with self.getter_lock:
+            async with asyncio.TaskGroup() as tg:
+                to_get = set()
+                for match_set in matches:
+                    m = list(match_set)
+                    m.pop(0)
+                    org = m.pop(0) or self.main_org
+                    # Trim trailing slash if present
+                    if org.endswith("/"):
+                        org = org[:-1]
+                    repo = m.pop(0) or self.main_repo
+                    n = int(m.pop(0))
+                    if n in to_get:
+                        continue
+                    to_get.add(n)
+                    key = f"{evt.room_id};{org};{repo};{n}"
+                    cache_set.add(key)
 
-                last_sent = self.last_sent.get(key, 0)
-                if now - last_sent < 60:
-                    self.log.info(
-                        "Ignoring request for %s/%s#%d as it was sent %.1fs ago", org, repo, n, now - last_sent
-                    )
-                    continue
-                self.log.info("Fetching issue %d from %s/%s", n, org, repo)
-                t.append(tg.create_task(self.get_issue(n, f"{org}/{repo}"), name=key))
+                    last_sent = self.last_sent.get(key, 0)
+                    if now - last_sent < 60:
+                        await self.client.react(evt.room_id, evt.event_id, "⏳")
+                        self.log.info(
+                            "Ignoring request for %s/%s#%d as it was sent %.1fs ago", org, repo, n, now - last_sent
+                        )
+                        continue
+                    self.log.info("Fetching issue %d from %s/%s", n, org, repo)
+                    t.append(tg.create_task(self.get_issue(n, f"{org}/{repo}"), name=key))
 
         lines = []
         for task in t:
@@ -209,6 +211,7 @@ class ContinuwuityHelper(Plugin):
                 last_sent = self.last_sent.get(cache_key, 0)
                 if now - last_sent < 60:
                     self.log.info("Ignoring request for MSC%d as it was sent %.1fs ago", n, now - last_sent)
+                    await self.client.react(evt.room_id, evt.event_id, "⏳")
                     continue
                 self.log.info("Fetching MSC %d", n)
 
