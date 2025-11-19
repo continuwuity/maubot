@@ -57,7 +57,7 @@ class ContinuwuityHelper(Plugin):
 
     @property
     def forge(self) -> str:
-        return self.config.get("forge", "https://forgejo.ellis.link")
+        return self.config.get("forge", "https://forgejo.ellis.link").rstrip("/")
 
     @property
     def base_url(self):
@@ -167,7 +167,7 @@ class ContinuwuityHelper(Plugin):
             )
             labels = []
             for label in result["labels"]:
-                url = "https://forgejo.ellis.link/continuwuation/continuwuity/{}s?q=&labels={!s}".format(
+                url = self.forge + "/{}s?q=&labels={!s}".format(
                     "pull" if "pull_request" in result else "issue", label["id"]
                 )
                 fg, bg, ok = modulate_colour(
