@@ -1,5 +1,6 @@
 import asyncio
 import time
+import warnings
 from typing import Type
 from urllib.parse import quote
 
@@ -8,6 +9,13 @@ from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event
 from mautrix.types import EventType, ReactionEvent
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
+
+try:
+    from resolvematrix.cache import VoidResolutionCache
+    from resolvematrix.async_ import AsyncClientResolver, AsyncServerResolver
+except ImportError:
+    warnings.warn("resolvematrix is not installed in this environment; disabling commands")
+    AsyncClientResolver = AsyncServerResolver = VoidResolutionCache = None
 
 from .vendor.color_contrast import AccessibilityLevel, ModulationMode
 from .vendor.color_contrast import modulate as modulate_colour
@@ -36,6 +44,8 @@ class ContinuwuityHelper(Plugin):
         super().__init__(**kwargs)
         self.last_sent: dict[str, float] = {}
         self.getter_lock = asyncio.Lock()
+        self.server_resolver = AsyncServerResolver(cache=VoidResolutionCache()) if AsyncServerResolver else None
+        self.client_resolver = AsyncClientResolver(cache=VoidResolutionCache()) if AsyncClientResolver else None
 
     async def start(self) -> None:
         self.config.load_and_update()
@@ -267,3 +277,80 @@ class ContinuwuityHelper(Plugin):
         for k in cache_set:
             self.last_sent[k] = now
         await evt.react("\N{WASTEBASKET}")
+
+    @command.new("resolve")
+    @command.argument("server_name", required=True)
+    async def resolve_server(self, evt: MessageEvent, server_name: str) -> None:
+        """Performs server-to-server and client-to-server resolution for a Matrix server.
+
+        Usage: !resolve <server>
+
+        Example: !resolve matrix.org
+        """
+        if AsyncServerResolver is None:
+            await evt.reply("This command is not currently available.")
+            return
+
+        await self.client.set_typing(evt.room_id, 60_000)
+        output = []
+        start = time.perf_counter()
+        try:
+            self.log.info("Resolving server %s", server_name)
+            result = await self.server_resolver.resolve(server_name)
+            result_str = "(host: {0.host_header}, sni: {0.sni}, step: {0._step})".format(result)
+            self.log.debug("Resolved %s to %r", server_name, result)
+            e2 = time.perf_counter() - start
+        except Exception as e:
+            self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
+            e2 = time.perf_counter() - start
+            output.append(f"\N{CROSS MARK} Failed to resolve server-to-server after {e2:.2f}s: `{e}`")
+        else:
+            try:
+                ver = await self.server_resolver.get_server_version(result)
+            except Exception as e:
+                output.append(
+                    f"\N{WARNING SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}, but could not"
+                    f" fetch server version: `{e}`"
+                )
+            else:
+                try:
+                    keys = await self.server_resolver.get_server_keys(result)
+                except Exception as e:
+                    output.append(
+                        f"\N{WARNING SIGN} Resolved server-to-server after {e2:.2f}s: {result_str} "
+                        f"(version: {'/'.join(ver)}), but could not fetch server keys: `{e}`"
+                    )
+                else:
+                    output += [
+                        f"\N{WHITE HEAVY CHECK MARK} Resolved server-to-server after {e2:.2f}s: {result_str}"
+                        f" (version: {'/'.join(ver)}, signing keys:"
+                        f" {', '.join(keys.verify_keys.keys())})"
+                    ]
+
+        output.append("")
+        start = time.perf_counter()
+        try:
+            self.log.info("Resolving client %s", server_name)
+            result = await self.client_resolver.resolve(server_name)
+            e2 = time.perf_counter() - start
+            self.log.debug("Resolved %s to %r, fetching versions", server_name, result)
+        except Exception as e:
+            self.log.error("Error while resolving client %s: %s", server_name, e, exc_info=e)
+            e2 = time.perf_counter() - start
+            output.append(f"\N{CROSS MARK} Failed to resolve client-to-server after {e2:.2f}s: `{e}`")
+        else:
+            try:
+                ver = await self.client_resolver.get_client_versions(result)
+            except Exception as e:
+                output.append(
+                    f"\N{WARNING SIGN} Resolved client-to-server after {e2:.2f}s: {result}, but could not"
+                    f" fetch client versions: `{e}"
+                )
+            else:
+                output += [
+                    f"\N{WHITE HEAVY CHECK MARK} Resolved client-to-server after {e2:.2f}s: {result}"
+                    f" (versions: {', '.join(ver.versions)})"
+                ]
+
+        await evt.reply("\n".join(output), markdown=True, allow_html=False)
+        await self.client.set_typing(evt.room_id, 0)

@@ -4,5 +4,7 @@ license: Apache-2.0
 modules:
   - continuwuitybot
 main_class: ContinuwuityHelper
+soft_dependencies:
+  - resolvematrix~=1.1.0rc1
 extra_files:
   - base-config.yaml
