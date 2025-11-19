@@ -1,4 +1,4 @@
 forge: https://forgejo.ellis.link  # base URL for the forgejo/gitea instance
 repo:  # primary repo
-    owner: continuwuation
-    name: continuwuity
+  owner: continuwuation
+  name: continuwuity

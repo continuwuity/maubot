@@ -102,6 +102,8 @@ class ContinuwuityHelper(Plugin):
 
     @event.on(EventType.REACTION)
     async def on_reaction(self, evt: ReactionEvent):
+        if evt.sender == self.client.mxid:
+            return
         if evt.content.relates_to.key.strip() != "🗑️":
             self.log.debug("ignoring reaction with key %s", evt.content.relates_to.key)
             return
@@ -191,6 +193,7 @@ class ContinuwuityHelper(Plugin):
         await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
+        await evt.react("\N{WASTEBASKET}")
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
@@ -263,3 +266,4 @@ class ContinuwuityHelper(Plugin):
         await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
+        await evt.react("\N{WASTEBASKET}")
