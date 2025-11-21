@@ -200,10 +200,10 @@ class ContinuwuityHelper(Plugin):
         if not lines:
             return
         o = "\n".join(lines)
-        await evt.reply(o, markdown=True, allow_html=True)
+        reply_id = await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
-        await evt.react("\N{WASTEBASKET}")
+        await self.client.react(evt.room_id, reply_id, "\N{WASTEBASKET}")
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
@@ -273,10 +273,10 @@ class ContinuwuityHelper(Plugin):
         if not lines:
             return
         o = "\n".join(lines)
-        await evt.reply(o, markdown=True, allow_html=True)
+        reply_id = await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
-        await evt.react("\N{WASTEBASKET}")
+        await self.client.react(evt.room_id, reply_id, "\N{WASTEBASKET}")
 
     @command.new("resolve")
     @command.argument("server_name", required=True)

@@ -1,0 +1,2 @@
+maubot~=0.6
+resolvematrix==1.0.0rc1
