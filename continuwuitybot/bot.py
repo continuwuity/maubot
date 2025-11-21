@@ -131,6 +131,8 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive(r"([a-zA-Z]+/)?([a-zA-Z]+)?[#!](\d+)", multiple=True)
     async def on_issue_number(self, evt: MessageEvent, matches: list[tuple[str]]):
+        if evt.content.relates_to.rel_type == "m.replace":
+            return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         t: list[asyncio.Task] = []
@@ -207,6 +209,8 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
+        if evt.content.relates_to.rel_type == "m.replace":
+            return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
         lines = []
@@ -327,7 +331,6 @@ class ContinuwuityHelper(Plugin):
                         f" {', '.join(keys.verify_keys.keys())})"
                     ]
 
-        output.append("")
         start = time.perf_counter()
         try:
             self.log.info("Resolving client %s", server_name)
