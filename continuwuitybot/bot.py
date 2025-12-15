@@ -20,6 +20,8 @@ except ImportError:
 from .vendor.color_contrast import AccessibilityLevel, ModulationMode
 from .vendor.color_contrast import modulate as modulate_colour
 
+WASTEBASKET = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
+
 
 def colour_span(text: str, *, fg: str | None = None, bg: str | None = None) -> str:
     span = "<span"
@@ -114,7 +116,7 @@ class ContinuwuityHelper(Plugin):
     async def on_reaction(self, evt: ReactionEvent):
         if evt.sender == self.client.mxid:
             return
-        if evt.content.relates_to.key.strip() != "🗑️":
+        if evt.content.relates_to.key != WASTEBASKET:
             self.log.debug("ignoring reaction with key %s", evt.content.relates_to.key)
             return
         target_event = await self.client.get_event(evt.room_id, evt.content.relates_to.event_id)
@@ -205,11 +207,11 @@ class ContinuwuityHelper(Plugin):
         reply_id = await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
-        await self.client.react(evt.room_id, reply_id, "\N{WASTEBASKET}")
+        await self.client.react(evt.room_id, reply_id, WASTEBASKET)
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
-        if evt.content.relates_to.rel_type == "m.replace":
+        if evt.content.relates_to.rel_type == "m.replace" or evt.content.startswith("* "):
             return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
@@ -280,7 +282,7 @@ class ContinuwuityHelper(Plugin):
         reply_id = await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
-        await self.client.react(evt.room_id, reply_id, "\N{WASTEBASKET}")
+        await self.client.react(evt.room_id, reply_id, WASTEBASKET)
 
     @command.new("resolve")
     @command.argument("server_name", required=True)
