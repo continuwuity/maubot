@@ -211,7 +211,7 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
-        if evt.content.relates_to.rel_type == "m.replace" or evt.content.startswith("* "):
+        if evt.content.relates_to.rel_type == "m.replace" or evt.content.body.startswith("* "):
             return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
