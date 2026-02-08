@@ -151,7 +151,7 @@ class ContinuwuityHelper(Plugin):
                         org = org[:-1]
                     repo = m.pop(0) or self.main_repo
                     n = int(m.pop(0))
-                    if n in to_get:
+                    if n in to_get or n < 100:
                         continue
                     to_get.add(n)
                     key = f"{evt.room_id};{org};{repo};{n}"
