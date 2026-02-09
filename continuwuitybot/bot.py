@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import warnings
 from typing import Type
@@ -376,7 +377,9 @@ class ContinuwuityHelper(Plugin):
         await self.client.set_typing(evt.room_id, 60_000)
         try:
             destination = await self.server_resolver.resolve(server_name)
+            await self.client.set_typing(evt.room_id, 0)
         except Exception as e:
+            await self.client.set_typing(evt.room_id, 0)
             self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
             await evt.reply(f"\N{CROSS MARK} Failed to resolve server: `{e}`")
             return
@@ -385,12 +388,27 @@ class ContinuwuityHelper(Plugin):
         fed = self.server_resolver.create_request(destination, "GET", "/_matrix/federation/v1/version")
         try:
             resp = await self.server_resolver.client.send(fed)
-            resp.raise_for_status()
-            data = await resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                self.log.warning("Unexpected response type for version from %s: %r", server_name, data)
+                await evt.reply(
+                    f"\N{WARNING SIGN} Resolved server to {destination}, but got malformed version response: `{data}`"
+                )
+                return
+
             version = data.get("server", {})
+            if not isinstance(version, dict):
+                self.log.warning("Unexpected 'server' field type for version from %s: %r", server_name, version)
+                await evt.reply(
+                    f"\N{WARNING SIGN} Resolved server to {destination}, but got malformed version data: `{data}`"
+                )
+                return
             name = version.get("name", "Unknown")
             ver = version.get("version", "Unknown")
-            await evt.reply(f"\N{WHITE HEAVY CHECK MARK} Reported version: {name}/{ver}")
+            msg = f"\N{WHITE HEAVY CHECK MARK} Reported version: `{name}/{ver}`"
+            if name == "Unknown" or ver == "Unknown":
+                msg += f" (raw response: `{json.dumps(data)}`)"
+            await evt.reply(msg)
             return
         except Exception as e:
             self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
