@@ -359,3 +359,41 @@ class ContinuwuityHelper(Plugin):
 
         await evt.reply("\n".join(output), markdown=True, allow_html=False)
         await self.client.set_typing(evt.room_id, 0)
+
+    @command.new("version")
+    @command.argument("server_name", required=True)
+    async def resolve_version(self, evt: MessageEvent, server_name: str) -> None:
+        """Fetches the advertised version of a Matrix server.
+
+        Usage: !version <server>
+
+        Example: !version matrix.org
+        """
+        if AsyncServerResolver is None:
+            await evt.reply("This command is not currently available.")
+            return
+
+        await self.client.set_typing(evt.room_id, 60_000)
+        try:
+            destination = await self.server_resolver.resolve(server_name)
+        except Exception as e:
+            self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
+            await evt.reply(f"\N{CROSS MARK} Failed to resolve server: `{e}`")
+            return
+
+        # get the advertised federation version
+        fed = self.server_resolver.create_request(destination, "GET", "/_matrix/federation/v1/version")
+        try:
+            resp = await self.server_resolver.client.send(fed)
+            resp.raise_for_status()
+            data = await resp.json()
+            version = data.get("server", {})
+            name = version.get("name", "Unknown")
+            ver = version.get("version", "Unknown")
+            await evt.reply(f"\N{WHITE HEAVY CHECK MARK} Reported version: {name}/{ver}")
+            return
+        except Exception as e:
+            self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
+            await evt.reply(
+                f"\N{WARNING SIGN} Resolved server to {destination}, but failed to fetch federation version: `{e}`"
+            )
