@@ -22,6 +22,9 @@ from .vendor.color_contrast import AccessibilityLevel, ModulationMode
 from .vendor.color_contrast import modulate as modulate_colour
 
 WASTEBASKET = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
+WARNING_SIGN = "\N{WARNING SIGN}\N{VARIATION SELECTOR-16}"
+CHECKMARK = "\N{WHITE HEAVY CHECK MARK}"
+CROSS = "\N{CROSS MARK}"
 
 
 def colour_span(text: str, *, fg: str | None = None, bg: str | None = None) -> str:
@@ -310,13 +313,13 @@ class ContinuwuityHelper(Plugin):
         except Exception as e:
             self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
             e2 = time.perf_counter() - start
-            output.append(f"\N{CROSS MARK} Failed to resolve server-to-server after {e2:.2f}s: `{e}`")
+            output.append(f"{CROSS} Failed to resolve server-to-server after {e2:.2f}s: `{e}`")
         else:
             try:
                 ver = await self.server_resolver.get_server_version(result)
             except Exception as e:
                 output.append(
-                    f"\N{WARNING SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}, but could not"
+                    f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}, but could not"
                     f" fetch server version: `{e}`"
                 )
             else:
@@ -324,12 +327,12 @@ class ContinuwuityHelper(Plugin):
                     keys = await self.server_resolver.get_server_keys(result)
                 except Exception as e:
                     output.append(
-                        f"\N{WARNING SIGN} Resolved server-to-server after {e2:.2f}s: {result_str} "
+                        f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str} "
                         f"(version: {'/'.join(ver)}), but could not fetch server keys: `{e}`"
                     )
                 else:
                     output += [
-                        f"\N{WHITE HEAVY CHECK MARK} Resolved server-to-server after {e2:.2f}s: {result_str}"
+                        f"{CHECKMARK} Resolved server-to-server after {e2:.2f}s: {result_str}"
                         f" (version: {'/'.join(ver)}, signing keys:"
                         f" {', '.join(keys.verify_keys.keys())})"
                     ]
@@ -343,22 +346,22 @@ class ContinuwuityHelper(Plugin):
         except Exception as e:
             self.log.error("Error while resolving client %s: %s", server_name, e, exc_info=e)
             e2 = time.perf_counter() - start
-            output.append(f"\N{CROSS MARK} Failed to resolve client-to-server after {e2:.2f}s: `{e}`")
+            output.append(f"{CROSS} Failed to resolve client-to-server after {e2:.2f}s: `{e}`")
         else:
             try:
                 ver = await self.client_resolver.get_client_versions(result)
             except Exception as e:
                 output.append(
-                    f"\N{WARNING SIGN} Resolved client-to-server after {e2:.2f}s: {result}, but could not"
+                    f"{WARNING_SIGN} Resolved client-to-server after {e2:.2f}s: {result}, but could not"
                     f" fetch client versions: `{e}"
                 )
             else:
                 output += [
-                    f"\N{WHITE HEAVY CHECK MARK} Resolved client-to-server after {e2:.2f}s: {result}"
+                    f"{CHECKMARK} Resolved client-to-server after {e2:.2f}s: {result}"
                     f" (versions: {', '.join(ver.versions)})"
                 ]
 
-        await evt.reply("\n".join(output), markdown=True, allow_html=False)
+        await evt.reply("\n\n".join(output), markdown=True, allow_html=False)
         await self.client.set_typing(evt.room_id, 0)
 
     @command.new("version")
@@ -381,7 +384,7 @@ class ContinuwuityHelper(Plugin):
         except Exception as e:
             await self.client.set_typing(evt.room_id, 0)
             self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
-            await evt.reply(f"\N{CROSS MARK} Failed to resolve server: `{e}`")
+            await evt.reply(f"{CROSS} Failed to resolve server: `{e}`")
             return
 
         # get the advertised federation version
@@ -392,7 +395,7 @@ class ContinuwuityHelper(Plugin):
             if not isinstance(data, dict):
                 self.log.warning("Unexpected response type for version from %s: %r", server_name, data)
                 await evt.reply(
-                    f"\N{WARNING SIGN} Resolved server to {destination}, but got malformed version response: `{data}`"
+                    f"{WARNING_SIGN} Resolved server to {destination}, but got malformed version response: `{data}`"
                 )
                 return
 
@@ -400,7 +403,7 @@ class ContinuwuityHelper(Plugin):
             if not isinstance(version, dict):
                 self.log.warning("Unexpected 'server' field type for version from %s: %r", server_name, version)
                 await evt.reply(
-                    f"\N{WARNING SIGN} Resolved server to {destination}, but got malformed version data: `{data}`"
+                    f"{WARNING_SIGN} Resolved server to {destination}, but got malformed version data: `{data}`"
                 )
                 return
             name = version.get("name", "Unknown")
@@ -413,5 +416,5 @@ class ContinuwuityHelper(Plugin):
         except Exception as e:
             self.log.error("Error while resolving server %s: %s", server_name, e, exc_info=e)
             await evt.reply(
-                f"\N{WARNING SIGN} Resolved server to {destination}, but failed to fetch federation version: `{e}`"
+                f"{WARNING_SIGN} Resolved server to {destination}, but failed to fetch federation version: `{e}`"
             )
