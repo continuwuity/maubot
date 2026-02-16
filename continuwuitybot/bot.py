@@ -340,7 +340,7 @@ class ContinuwuityHelper(Plugin):
         start = time.perf_counter()
         try:
             self.log.info("Resolving client %s", server_name)
-            result = await self.client_resolver.resolve(server_name)
+            result = await self.client_resolver.resolve(server_name, extra_validation=False)
             e2 = time.perf_counter() - start
             self.log.debug("Resolved %s to %r, fetching versions", server_name, result)
         except Exception as e:
