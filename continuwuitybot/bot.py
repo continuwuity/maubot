@@ -318,6 +318,7 @@ class ContinuwuityHelper(Plugin):
             try:
                 ver = await self.server_resolver.get_server_version(result)
             except Exception as e:
+                self.log.error("Error while fetching server version for %s: %s", server_name, e, exc_info=e)
                 output.append(
                     f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}, but could not"
                     f" fetch server version: `{e}`"
@@ -326,6 +327,7 @@ class ContinuwuityHelper(Plugin):
                 try:
                     keys = await self.server_resolver.get_server_keys(result)
                 except Exception as e:
+                    self.log.error("Error while fetching server keys for %s: %s", server_name, e, exc_info=e)
                     output.append(
                         f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str} "
                         f"(version: {'/'.join(ver)}), but could not fetch server keys: `{e}`"
@@ -351,6 +353,7 @@ class ContinuwuityHelper(Plugin):
             try:
                 ver = await self.client_resolver.get_client_versions(result)
             except Exception as e:
+                self.log.error("Error while fetching client versions for %s: %s", server_name, e, exc_info=e)
                 output.append(
                     f"{WARNING_SIGN} Resolved client-to-server after {e2:.2f}s: {result}, but could not"
                     f" fetch client versions: `{e}`"
