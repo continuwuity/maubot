@@ -353,7 +353,7 @@ class ContinuwuityHelper(Plugin):
             except Exception as e:
                 output.append(
                     f"{WARNING_SIGN} Resolved client-to-server after {e2:.2f}s: {result}, but could not"
-                    f" fetch client versions: `{e}"
+                    f" fetch client versions: `{e}`"
                 )
             else:
                 output += [
