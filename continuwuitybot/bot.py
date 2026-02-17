@@ -25,6 +25,18 @@ WASTEBASKET = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
 WARNING_SIGN = "\N{WARNING SIGN}\N{VARIATION SELECTOR-16}"
 CHECKMARK = "\N{WHITE HEAVY CHECK MARK}"
 CROSS = "\N{CROSS MARK}"
+S2S_STEPS = {
+    1.0: "IP literal with explicit port",
+    2.0: "domain name with explicit port",
+    3.1: "well-known delegation to IP literal",
+    3.2: "well-known delegation to domain name with explicit port",
+    3.3: "well-known delegation to domain name using `_matrix-fed._tcp` SRV record",
+    3.4: "well-known delegation to domain name using deprecated `_matrix._tcp` SRV record",
+    3.5: "well-known delegation to domain name using default port",
+    4.0: "`_matrix-fed._tcp` SRV record",
+    5.0: "deprecated `_matrix._tcp` SRV record",
+    6.0: "default port"
+}
 
 
 def colour_span(text: str, *, fg: str | None = None, bg: str | None = None) -> str:
@@ -307,7 +319,10 @@ class ContinuwuityHelper(Plugin):
         try:
             self.log.info("Resolving server %s", server_name)
             result = await self.server_resolver.resolve(server_name)
-            result_str = "(host: {0.host_header}, sni: {0.sni}, step: {0._step})".format(result)
+            result_str = "\n* Host: `{0.host_header}`\n* TLS name: `{0.sni}`\n* Resolution step: {1}\n".format(
+                result,
+                S2S_STEPS.get(result._step, "unrecognised step") + f" ({result._step})",
+            )
             self.log.debug("Resolved %s to %r", server_name, result)
             e2 = time.perf_counter() - start
         except Exception as e:
@@ -316,28 +331,28 @@ class ContinuwuityHelper(Plugin):
             output.append(f"{CROSS} Failed to resolve server-to-server after {e2:.2f}s: `{e}`")
         else:
             try:
-                ver = await self.server_resolver.get_server_version(result)
+                ver = list(await self.server_resolver.get_server_version(result))
+                ver[0] = ver[0] or "Unknown"
+                ver[1] = ver[1] or "Unknown"
+                result_str += f"* Advertised version: `{ver[0]}/{ver[1]}`\n"
             except Exception as e:
                 self.log.error("Error while fetching server version for %s: %s", server_name, e, exc_info=e)
                 output.append(
-                    f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}, but could not"
+                    f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}\nBut could not"
                     f" fetch server version: `{e}`"
                 )
             else:
                 try:
                     keys = await self.server_resolver.get_server_keys(result)
+                    result_str += f"* Signing keys: {', '.join(keys.verify_keys.keys())}\n"
                 except Exception as e:
                     self.log.error("Error while fetching server keys for %s: %s", server_name, e, exc_info=e)
                     output.append(
-                        f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str} "
-                        f"(version: {'/'.join(ver)}), but could not fetch server keys: `{e}`"
+                        f"{WARNING_SIGN} Resolved server-to-server after {e2:.2f}s: {result_str}\n"
+                        f"But could not fetch server signing keys: `{e}`"
                     )
                 else:
-                    output += [
-                        f"{CHECKMARK} Resolved server-to-server after {e2:.2f}s: {result_str}"
-                        f" (version: {'/'.join(ver)}, signing keys:"
-                        f" {', '.join(keys.verify_keys.keys())})"
-                    ]
+                    output.append(f"{CHECKMARK} Resolved server-to-server after {e2:.2f}s: {result_str}")
 
         start = time.perf_counter()
         try:
