@@ -500,8 +500,7 @@ class ContinuwuityHelper(Plugin):
                         )
 
                     try:
-                        data = await response.json()
-                        self.log.debug("Data for %s: %r", server_name, data)
+                        data = json.loads(await response.text("utf-8"))
                     except Exception as e:
                         output.append(
                             f"{CROSS} Failed to parse response from `{response.url}` (HTTP {response.status}): `{e}`. "
@@ -515,6 +514,10 @@ class ContinuwuityHelper(Plugin):
                                     bu = hs["base_url"]
                                     if isinstance(data["m.homeserver"]["base_url"], str):
                                         base_url = bu
+                                        output.append(
+                                            f"{CHECKMARK} Successfully fetched [client well-known]({response.url}) and"
+                                            f" parsed & validated response."
+                                        )
                                         if not base_url.startswith("https://"):
                                             output.append(
                                                 f"{WARNING_SIGN} Base url `{base_url}` is not a HTTPS url. "
@@ -573,7 +576,7 @@ class ContinuwuityHelper(Plugin):
                     check_is_json(response, output)
 
                     try:
-                        data = await response.json()
+                        data = json.loads(await response.text())
                     except Exception as e:
                         output.append(
                             f"{CROSS} Failed to parse response from `{response.url}`: `{e}`. "
