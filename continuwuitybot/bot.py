@@ -6,8 +6,9 @@ from typing import Type
 from urllib.parse import quote
 
 import aiohttp
+from aiohttp.web import Request, Response, json_response
 from maubot import MessageEvent, Plugin
-from maubot.handlers import command, event
+from maubot.handlers import command, event, web
 from mautrix.types import EventType, ReactionEvent
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -64,6 +65,7 @@ class ContinuwuityHelper(Plugin):
         self.getter_lock = asyncio.Lock()
         self.server_resolver = AsyncServerResolver(cache=VoidResolutionCache()) if AsyncServerResolver else None
         self.client_resolver = AsyncClientResolver(cache=VoidResolutionCache()) if AsyncClientResolver else None
+        self.log.debug("Forgejo webhook URL: %s/forgejo/webhook", self.webapp_url)
 
     async def start(self) -> None:
         self.config.load_and_update()
@@ -436,3 +438,183 @@ class ContinuwuityHelper(Plugin):
             await evt.reply(
                 f"{WARNING_SIGN} Resolved server to {destination}, but failed to fetch federation version: `{e}`"
             )
+
+    @command.new("diagnose")
+    @command.argument("server_name", required=True)
+    async def diagnose_server(self, evt: MessageEvent, server_name: str) -> None:
+        """Attempts to diagnose common problems with new server setups."""
+        if AsyncServerResolver is None or self.client_resolver is None:
+            await evt.reply("This command is not currently available.")
+            return
+
+        def check_cors(resp: aiohttp.ClientResponse, out: list) -> None:
+            cors = resp.headers.get("Access-Control-Allow-Origin", "")
+            if cors == "":
+                out.append(
+                    f"{WARNING_SIGN} `Access-Control-Allow-Origin` header is missing from `{resp.url}`. "
+                    f"web clients will likely be unable to contact the server."
+                )
+            elif cors != "*":
+                out.append(
+                    f"{WARNING_SIGN} `Access-Control-Allow-Origin` header is present in `{resp.url}`, but "
+                    f"has the value of `{cors}`. Web browsers typically require `*`, so web clients may be "
+                    f"unable to contact the server."
+                )
+
+        def check_is_json(resp: aiohttp.ClientResponse, out: list) -> None:
+            ct = resp.headers.get("Content-Type", "")
+            if ct == "":
+                out.append(
+                    f"{WARNING_SIGN} `Content-Type` header is missing from `{response.url}`. Most clients "
+                    f"require that this header is `application/json` and may not be able to resolve the server."
+                )
+            elif ct != "application/json":
+                out.append(
+                    f"{WARNING_SIGN} `Content-Type` header is present in `{response.url}`, but is not the "
+                    f"literal value of `application/json`. Some clients may refuse to process the result."
+                )
+
+        # First off, attempt to resolve well-known.
+        wk = f"https://{server_name}/.well-known/matrix/client"
+        base_url = f"https://{server_name}"
+        output = []
+        try:
+            self.log.debug("GET %s", wk)
+            async with self.http.get(wk) as response:
+                self.log.debug("GET %s: %d %s", wk, response.status, response.reason)
+                if response.status != 200:
+                    output.append(
+                        f"{CROSS} Non-200 HTTP response for `{response.url}`: {response.status} {response.reason}. "
+                        f"Most clients will not even attempt to read your response. Attempting to use fallback (some "
+                        f"clients may explicitly fail here instead)."
+                    )
+                else:
+                    check_cors(response, output)
+                    check_is_json(response, output)
+
+                    cl = response.headers.get("Content-Length", "")
+                    if cl == "":
+                        output.append(
+                            f"{WARNING_SIGN} `Content-Length` header is missing from `{response.url}`. Some clients "
+                            f"may refuse to parse the result and treat it as a failure instead."
+                        )
+
+                    try:
+                        data = await response.json()
+                        self.log.debug("Data for %s: %r", server_name, data)
+                    except Exception as e:
+                        output.append(
+                            f"{CROSS} Failed to parse response from `{response.url}` (HTTP {response.status}): `{e}`. "
+                            f"Attempting to use fallback (most clients will treat this as a failure instead)."
+                        )
+                    else:
+                        if "m.homeserver" in data:
+                            hs = data["m.homeserver"]
+                            if isinstance(hs, dict):
+                                if "base_url" in data["m.homeserver"]:
+                                    bu = hs["base_url"]
+                                    if isinstance(data["m.homeserver"]["base_url"], str):
+                                        base_url = bu
+                                        if not base_url.startswith("https://"):
+                                            output.append(
+                                                f"{WARNING_SIGN} Base url `{base_url}` is not a HTTPS url. "
+                                                f"Some clients may refuse to use this, and web-based clients may fail "
+                                                f"to communicate with the server due to mixed-security. "
+                                                f"Continuing anyway."
+                                            )
+                                        if base_url.endswith("/"):
+                                            output.append(
+                                                f"{WARNING_SIGN} Base url `{base_url}` ends with a trailing forward "
+                                                f"slash. Some buggy clients may forget to strip this and will have "
+                                                f"trouble with subsequent requests."
+                                            )
+                                            base_url = base_url.rstrip("/")
+                                    else:
+                                        output.append(
+                                            f"{CROSS} Well-known client response is malformed: "
+                                            f"`m.homeserver`->`base_url` is not a string (got {type(bu).__name__}). "
+                                            f"Attempting to use fallback (most clients will fail here instead)."
+                                        )
+                                else:
+                                    output.append(
+                                        f"{CROSS} Well-known client response is malformed: "
+                                        f"`base_url` is missing from `m.homeserver`. Attempting to use fallback (most "
+                                        f"clients will fail here instead)."
+                                    )
+                            else:
+                                output.append(
+                                    f"{CROSS} Well-known client response is malformed: "
+                                    f"`m.homeserver` is not an object (got {type(hs).__name__}). "
+                                    f"Attempting to use fallback (most clients will fail here instead)."
+                                )
+                        else:
+                            output.append(
+                                f"{CROSS} Well-known client response is malformed: "
+                                f"`m.homeserver` is missing. Attempting to use fallback (most clients will fail here "
+                                f"instead)."
+                            )
+        except Exception as e:
+            output.append(
+                f"{CROSS} Failed to contact well-known URL {wk}: `{e}`. Attempting to use fallback (some clients may "
+                f"explicitly fail here instead)."
+            )
+
+        # Then, try to contact /_matrix/client/versions.
+        try:
+            async with self.http.get(base_url + "/_matrix/client/versions") as response:
+                if response.status != 200:
+                    output.append(
+                        f"{CROSS} Failed to fetch client-to-server API versions (`{response.url}`): HTTP "
+                        f"{response.status} {response.reason}. Most clients will mark the server as unavailable and "
+                        f"refuse to continue."
+                    )
+                else:
+                    check_cors(response, output)
+                    check_is_json(response, output)
+
+                    try:
+                        data = await response.json()
+                    except Exception as e:
+                        output.append(
+                            f"{CROSS} Failed to parse response from `{response.url}`: `{e}`. "
+                            f"Most clients will mark the server as unavailable and refuse to continue."
+                        )
+                    else:
+                        versions = data.get("versions")
+                        if versions is None:
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` is not present."
+                            )
+                        elif not isinstance(versions, list):
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` was not an array."
+                            )
+                        elif len(versions) == 0:
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` was empty."
+                            )
+                        elif not all(isinstance(item, str) for item in versions):
+                            t = set(type(v).__name__ for v in versions)
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` was not an array of "
+                                f"strings (instead got `Array<{'|'.join(t)}>`)."
+                            )
+                        else:
+                            output.append(
+                                f"{CHECKMARK} Successfully resolved client-to-server API base URL to {base_url} and "
+                                f"fetched supported client-to-server API versions. Clients should be able to connect "
+                                f"successfully."
+                            )
+                            if "v1.11" not in versions:
+                                output.append(
+                                    f"{WARNING_SIGN} `v1.11` is not present in `versions`. Clients may attempt to use "
+                                    f"legacy/unauthenticated media endpoints."
+                                )
+        except Exception as e:
+            output.append(
+                f"{CROSS} Failed to fetch client-to-server API versions (`{response.url}`): {e}. Most clients will "
+                f"mark the server as unavailable and refuse to continue."
+            )
+
+
+        await evt.reply("\n\n".join(output), markdown=True, allow_html=False)
