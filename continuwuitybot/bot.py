@@ -451,13 +451,13 @@ class ContinuwuityHelper(Plugin):
             cors = resp.headers.get("Access-Control-Allow-Origin", "")
             if cors == "":
                 out.append(
-                    f"{WARNING_SIGN} `Access-Control-Allow-Origin` header is missing from `{resp.url}`. "
-                    f"web clients will likely be unable to contact the server."
+                    f"{CROSS} `Access-Control-Allow-Origin` header is missing from `{resp.url}`. "
+                    f"Web clients will be unable to contact the server."
                 )
             elif cors != "*":
                 out.append(
-                    f"{WARNING_SIGN} `Access-Control-Allow-Origin` header is present in `{resp.url}`, but "
-                    f"has the value of `{cors}`. Web browsers typically require `*`, so web clients may be "
+                    f"{CROSS} `Access-Control-Allow-Origin` header is present in `{resp.url}`, but "
+                    f"has the value of `{cors}`. Web browsers typically require `*`, so web clients will be "
                     f"unable to contact the server."
                 )
 
@@ -465,19 +465,25 @@ class ContinuwuityHelper(Plugin):
             ct = resp.headers.get("Content-Type", "")
             if ct == "":
                 out.append(
-                    f"{WARNING_SIGN} `Content-Type` header is missing from `{response.url}`. Most clients "
+                    f"{WARNING_SIGN} `Content-Type` header is missing from `{resp.url}`. Most clients "
                     f"require that this header is `application/json` and may not be able to resolve the server."
                 )
             elif ct != "application/json":
                 out.append(
-                    f"{WARNING_SIGN} `Content-Type` header is present in `{response.url}`, but is not the "
-                    f"literal value of `application/json`. Some clients may refuse to process the result."
+                    f"{WARNING_SIGN} `Content-Type` header is present in `{resp.url}`, but is not the "
+                    f"literal value of `application/json` (got: `{ct}`). Some clients may refuse to process the result."
                 )
+
+        power_levels = await self.client.state_store.get_power_levels(evt.room_id)
+        if power_levels is None or power_levels.get_user_level(evt.sender) == power_levels.users_default:
+            await evt.react("\N{CROSS MARK}")
+            return
 
         # First off, attempt to resolve well-known.
         wk = f"https://{server_name}/.well-known/matrix/client"
         base_url = f"https://{server_name}"
         output = []
+        reaction_event = await evt.react("\u23F3")  # hourglass
         try:
             self.log.debug("GET %s", wk)
             async with self.http.get(wk) as response:
@@ -615,9 +621,10 @@ class ContinuwuityHelper(Plugin):
                                 )
         except Exception as e:
             output.append(
-                f"{CROSS} Failed to fetch client-to-server API versions (`{response.url}`): {e}. Most clients will "
+                f"{CROSS} Failed to fetch client-to-server API versions: {e}. Most clients will "
                 f"mark the server as unavailable and refuse to continue."
             )
 
 
-        await evt.reply("\n\n".join(output), markdown=True, allow_html=False)
+        await evt.reply("THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False)
+        await self.client.redact(evt.room_id, reaction_event)
