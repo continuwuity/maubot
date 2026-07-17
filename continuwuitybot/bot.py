@@ -11,6 +11,8 @@ from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event, web
 from mautrix.types import EventType, ReactionEvent
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
+from resolvematrix import SERVER_NAME_REGEX, ServerDestination
+
 
 try:
     from resolvematrix.cache import VoidResolutionCache
@@ -321,7 +323,7 @@ class ContinuwuityHelper(Plugin):
         try:
             self.log.info("Resolving server %s", server_name)
             result = await self.server_resolver.resolve(server_name)
-            result_str = "\n* Host: `{0.host_header}`\n* TLS name: `{0.sni}`\n* Resolution step: {1}\n".format(
+            result_str = "\n* Connection address: `{0.hostname}`\n* Host (SNI): `{0.host_header}` (`{0.sni}`)\n* Resolution step: {1}\n".format(
                 result,
                 S2S_STEPS.get(result._step, "unrecognised step") + f" ({result._step})",
             )
@@ -383,6 +385,92 @@ class ContinuwuityHelper(Plugin):
 
         await evt.reply("\n\n".join(output), markdown=True, allow_html=False)
         await self.client.set_typing(evt.room_id, 0)
+
+    @command.new("resolve-full-s2s")
+    @command.argument("server_name", required=True)
+    async def resolve_full_server(self, evt: MessageEvent, server_name: str) -> None:
+        if AsyncServerResolver is None:
+            await evt.reply("This command is not currently available.")
+            return
+        if not (match := SERVER_NAME_REGEX.match(server_name)):
+            raise ValueError("Invalid server name")
+
+        ipv6, ipv4, hostname, port_str = match.groups()
+        port = int(port_str) if port_str else 8448
+        destination = ServerDestination(hostname=hostname)
+        output = []
+
+        if ipv4 or ipv6:
+            if port_str:
+                destination.hostname = f"{ipv4 or ipv6}:{port_str}"
+            try:
+                destination.port = port
+                keys = await self.server_resolver.get_server_keys(destination)
+                assert keys.server_name == server_name
+            except Exception:
+                output.append(f"{CROSS} {S2S_STEPS[1.0]}")
+            else:
+                output.append(f"{CHECKMARK} {S2S_STEPS[1.0]}")
+            output.append(f"{WASTEBASKET} {S2S_STEPS[2.0]}")
+            output.append(f"{WASTEBASKET} Well-known")
+        else:
+            output.append(f"{WASTEBASKET} {S2S_STEPS[1.0]}")
+            if port_str:
+                try:
+                    if port_str:
+                        destination.hostname = f"{hostname}:{port_str}"
+                    keys = await self.server_resolver.get_server_keys(destination)
+                    assert keys.server_name == server_name
+                except Exception:
+                    output.append(f"{CROSS} {S2S_STEPS[2.0]}")
+                else:
+                    output.append(f"{CHECKMARK} {S2S_STEPS[2.0]}")
+            else:
+                output.append(f"{WASTEBASKET} {S2S_STEPS[2.0]}")
+
+            try:
+                destination = await self.server_resolver.resolve_well_known(destination)
+                keys = await self.server_resolver.get_server_keys(destination)
+                assert keys.server_name == server_name, "server name mismatch"
+                output.append(f"{CHECKMARK} {S2S_STEPS[destination._step]}")
+            except Exception as e:
+                output.append(f"{CROSS} Well-known (error: {e!s})")
+
+        try:
+            new_address, new_port = await self.server_resolver.modern_srv_lookup(server_name)
+            destination.hostname = f"{new_address}:{new_port}"
+            destination.host_header = server_name
+            destination.sni = server_name
+            keys = await self.server_resolver.get_server_keys(destination)
+            assert keys.server_name == server_name, "server name mismatch"
+            output.append(f"{CHECKMARK} {S2S_STEPS[4.0]}")
+        except TypeError:
+            output.append(f"{CROSS} {S2S_STEPS[4.0]}")
+        except Exception as err:
+            output.append(f"{CROSS} {S2S_STEPS[4.0]}: {err!s}")
+
+        try:
+            new_address, new_port = await self.server_resolver.deprecated_srv_lookup(server_name)
+            destination.hostname = f"{new_address}:{new_port}"
+            destination.host_header = server_name
+            destination.sni = server_name
+            keys = await self.server_resolver.get_server_keys(destination)
+            assert keys.server_name == server_name, "server name mismatch"
+            output.append(f"{CHECKMARK} {S2S_STEPS[5.0]}")
+        except TypeError:
+            output.append(f"{CROSS} {S2S_STEPS[5.0]}")
+        except Exception as err:
+            output.append(f"{CROSS} {S2S_STEPS[5.0]}: {err!s}")
+
+        try:
+            destination = ServerDestination(hostname=hostname)
+            destination.hostname = f"{hostname}:8448"
+            keys = await self.server_resolver.get_server_keys(destination)
+            assert keys.server_name == server_name, "server name mismatch"
+            output.append(f"{CHECKMARK} {S2S_STEPS[6.0]}")
+        except Exception as err:
+            output.append(f"{CROSS} {S2S_STEPS[6.0]}: {err!s}")
+        await evt.reply("\n\n".join(output), markdown=True, allow_html=False)
 
     @command.new("version")
     @command.argument("server_name", required=True)
