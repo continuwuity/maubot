@@ -9,7 +9,8 @@ import aiohttp
 from aiohttp.web import Request, Response, json_response
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event, web
-from mautrix.types import EventType, ReactionEvent
+from mautrix.errors import MatrixRequestError
+from mautrix.types import CanonicalAliasStateEventContent, EventType, ReactionEvent, RelationType
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from resolvematrix import SERVER_NAME_REGEX, ServerDestination
 
@@ -153,7 +154,7 @@ class ContinuwuityHelper(Plugin):
 
     @command.passive(r"([a-zA-Z]+/)?([a-zA-Z]+)?[#!](\d+)", multiple=True)
     async def on_issue_number(self, evt: MessageEvent, matches: list[tuple[str]]):
-        if evt.content.relates_to.rel_type == "m.replace":
+        if evt.content.relates_to.rel_type == RelationType.REPLACE or evt.content.body.startswith("* "):
             return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
@@ -229,9 +230,9 @@ class ContinuwuityHelper(Plugin):
             self.last_sent[k] = now
         await self.client.react(evt.room_id, reply_id, WASTEBASKET)
 
-    @command.passive("MSC(\d{4})", multiple=True, case_insensitive=True)
+    @command.passive(r"MSC(\d{4})", multiple=True, case_insensitive=True)
     async def on_msc_number(self, evt: MessageEvent, matches: list[tuple[str]]):
-        if evt.content.relates_to.rel_type == "m.replace" or evt.content.body.startswith("* "):
+        if evt.content.relates_to.rel_type == RelationType.REPLACE or evt.content.body.startswith("* "):
             return  # don't react to message edits
         now = time.time()
         await self.client.set_fully_read_marker(evt.room_id, evt.event_id, evt.event_id)
@@ -302,6 +303,26 @@ class ContinuwuityHelper(Plugin):
         reply_id = await evt.reply(o, markdown=True, allow_html=True)
         for k in cache_set:
             self.last_sent[k] = now
+        await self.client.react(evt.room_id, reply_id, WASTEBASKET)
+
+    @command.passive(r"(i\.)?imgur\.com/", case_insensitive=True)
+    async def on_imgur_link(self, evt: MessageEvent, _):
+        if evt.content.relates_to.rel_type == RelationType.REPLACE or evt.content.body.startswith("* "):
+            return  # don't react to message edits
+        try:
+            alias = await self.client.get_state_event(evt.room_id, EventType.ROOM_CANONICAL_ALIAS)
+            assert alias is not None
+            assert isinstance(alias, CanonicalAliasStateEventContent)
+        except (MatrixRequestError, AssertionError) as e:
+            self.log.warning("Failed to get room alias: %s", e)
+            return
+        if alias.canonical_alias != "#continuwuity:continuwuity.org":
+            return
+        reply_id = await evt.reply(
+            "Note: many members of the maintainer team are unable to access Imgur due to geo-blocking. "
+            "Please consider using an alternative file service, such as "
+            "https://litterbox.catbox.moe or https://postimg.cc."
+        )
         await self.client.react(evt.room_id, reply_id, WASTEBASKET)
 
     @command.new("resolve")
