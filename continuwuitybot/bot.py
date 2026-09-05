@@ -9,8 +9,12 @@ import aiohttp
 from aiohttp.web import Request, Response, json_response
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event, web
+from mautrix.client import SyncStream
 from mautrix.errors import MatrixRequestError
-from mautrix.types import CanonicalAliasStateEventContent, EventType, ReactionEvent, RelationType
+from mautrix.types import (
+    CanonicalAliasStateEventContent, EventType, InReplyTo, Membership, ReactionEvent, RelatesTo, RelationType,
+    RoomID, StateEvent,
+)
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from resolvematrix import SERVER_NAME_REGEX, ServerDestination
 
@@ -132,6 +136,16 @@ class ContinuwuityHelper(Plugin):
             if e.status == 404:
                 return None
             return e
+
+    async def get_canonical_alias(self, room_id: RoomID) -> str | None:
+        try:
+            alias = await self.client.get_state_event(room_id, EventType.ROOM_CANONICAL_ALIAS)
+            assert alias is not None
+            assert isinstance(alias, CanonicalAliasStateEventContent)
+        except (MatrixRequestError, AssertionError) as e:
+            self.log.warning("Failed to get room alias: %s", e)
+            return None
+        return alias.canonical_alias or None
 
     @event.on(EventType.REACTION)
     async def on_reaction(self, evt: ReactionEvent):
@@ -309,14 +323,7 @@ class ContinuwuityHelper(Plugin):
     async def on_imgur_link(self, evt: MessageEvent, _):
         if evt.content.relates_to.rel_type == RelationType.REPLACE or evt.content.body.startswith("* "):
             return  # don't react to message edits
-        try:
-            alias = await self.client.get_state_event(evt.room_id, EventType.ROOM_CANONICAL_ALIAS)
-            assert alias is not None
-            assert isinstance(alias, CanonicalAliasStateEventContent)
-        except (MatrixRequestError, AssertionError) as e:
-            self.log.warning("Failed to get room alias: %s", e)
-            return
-        if alias.canonical_alias != "#continuwuity:continuwuity.org":
+        if (await self.get_canonical_alias(evt.room_id)) != "#continuwuity:continuwuity.org":
             return
         reply_id = await evt.reply(
             "Note: many members of the maintainer team are unable to access Imgur due to geo-blocking. "
@@ -737,3 +744,34 @@ class ContinuwuityHelper(Plugin):
 
         await evt.reply("THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False)
         await self.client.redact(evt.room_id, reaction_event)
+
+    @event.on(EventType.ROOM_MEMBER)
+    async def on_member_event(self, evt: StateEvent):
+        # TODO(nex): Have this check for mute policies instead of hardcoding servers?
+        if evt.sender.split(":", 1)[1] != "matrix.org":
+            return
+        if not hasattr(evt, "source"):
+            self.log.warning("%r does not have a `source` attr")
+            return
+        # noinspection unresolved-references
+        src: SyncStream = evt.source
+        if src & SyncStream.TIMELINE != SyncStream.TIMELINE:
+            return
+        if evt.prev_content is not None:
+            if evt.prev_content.membership != Membership.LEAVE:
+                return
+        if (await self.get_canonical_alias(evt.room_id)) != "#continuwuity:continuwuity.org":
+            return
+
+        displayname = evt.content.displayname or str(evt.sender)
+        reply_id = await self.client.send_markdown(
+            evt.room_id,
+            f"Welcome {displayname}! Unfortunately, due to a large amount of spam and otherwise poor behaviour from "
+            f"users on your server, we have had to mute all users on matrix.org. If you need support with "
+            f"continuwuity, you will have to [join on another homeserver](https://servers.joinmatrix.org/) (our demo "
+            f"server, `continuwuity.rocks`, is also available). Apologies for the inconvenience!"
+            f"\n\n*Anyone can react with {WASTEBASKET} to remove this message*",
+            allow_html=False,
+            relates_to=RelatesTo(in_reply_to=InReplyTo(event_id=evt.event_id)),
+        )
+        await self.client.react(evt.room_id, reply_id, WASTEBASKET)
