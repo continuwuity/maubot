@@ -7,6 +7,9 @@ rooms. The user `@bot:continuwuity.org` runs this plugin.
 
 - `!resolve <server_name>` - Performs client-to-server & server-to-server resolution on a given server name, displaying
   some information about the server if successful, or presenting some error information if not.
+- `!resolve-full-s2s <server_name>` - Performs each step of server-to-server resolution on a given server name,
+  displaying which routes work. Useful for finding out if any fallbacks are configured or broken.
+- `!version <server_name>` - Fetches the server's advertised version.
 
 ### Auto-responses
 
@@ -19,6 +22,9 @@ rooms. The user `@bot:continuwuity.org` runs this plugin.
   same list.
   The destination repo can be specified by prefixing the delimiter with the repo name, such as `continuwuity!1234` or
   `continuwuation/ruwuma!5678`. Cross-forge references are not supported yet.
+- `imgur.com` / `i.imgur.com` - When an Imgur link is found in a message (and the room's canonical alias
+  `#continuwuity:continuwuity.org`), a reply will be sent, informing the sender that the team cannot see Imgur posts.
+- When a user from a muted server joins, they will be informed that they are unable to speak.
 
 ## Questions etc
 
