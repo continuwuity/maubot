@@ -80,6 +80,8 @@ class ContinuwuityHelper(Plugin):
         self.client_resolver = AsyncClientResolver(cache=VoidResolutionCache()) if AsyncClientResolver else None
         self.log.debug("Forgejo webhook URL: %s/forgejo/webhook", self.webapp_url)
 
+        self.messages_since_last_mute_notice = 100
+
     async def start(self) -> None:
         self.config.load_and_update()
 
@@ -758,7 +760,8 @@ class ContinuwuityHelper(Plugin):
     @event.on(EventType.ROOM_MEMBER)
     async def on_member_event(self, evt: StateEvent):
         # TODO(nex): Have this check for mute policies instead of hardcoding servers?
-        if evt.sender.split(":", 1)[1] != "matrix.org":
+        self.messages_since_last_mute_notice += 1
+        if evt.sender.split(":", 1)[1] != "matrix.org" or self.messages_since_last_mute_notice < 20:
             return
         if not hasattr(evt, "source"):
             self.log.warning("%r does not have a `source` attr")
@@ -785,3 +788,14 @@ class ContinuwuityHelper(Plugin):
             relates_to=RelatesTo(in_reply_to=InReplyTo(event_id=evt.event_id)),
         )
         await self.client.react(evt.room_id, reply_id, WASTEBASKET)
+        self.messages_since_last_mute_notice = 0
+
+    @event.on(EventType.ROOM_MESSAGE)
+    async def on_message_event(self, evt: MessageEvent):
+        # noinspection unresolved-references
+        src: SyncStream = evt.source
+        if src & SyncStream.TIMELINE != SyncStream.TIMELINE:
+            return
+        if (await self.get_canonical_alias(evt.room_id)) != "#continuwuity:continuwuity.org":
+            return
+        self.messages_since_last_mute_notice += 1
