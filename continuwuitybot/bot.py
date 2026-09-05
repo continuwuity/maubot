@@ -6,14 +6,20 @@ from typing import Type
 from urllib.parse import quote
 
 import aiohttp
-from aiohttp.web import Request, Response, json_response
 from maubot import MessageEvent, Plugin
-from maubot.handlers import command, event, web
+from maubot.handlers import command, event
 from mautrix.client import SyncStream
 from mautrix.errors import MatrixRequestError
 from mautrix.types import (
-    CanonicalAliasStateEventContent, EventType, InReplyTo, Membership, ReactionEvent, RelatesTo, RelationType,
-    RoomID, StateEvent,
+    CanonicalAliasStateEventContent,
+    EventType,
+    InReplyTo,
+    Membership,
+    ReactionEvent,
+    RelatesTo,
+    RelationType,
+    RoomID,
+    StateEvent,
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from resolvematrix import SERVER_NAME_REGEX, ServerDestination
@@ -43,7 +49,7 @@ S2S_STEPS = {
     3.5: "well-known delegation to domain name using default port",
     4.0: "`_matrix-fed._tcp` SRV record",
     5.0: "deprecated `_matrix._tcp` SRV record",
-    6.0: "default port"
+    6.0: "default port",
 }
 
 
@@ -214,7 +220,9 @@ class ContinuwuityHelper(Plugin):
                 continue
             line = (
                 "* [#{0[number]} ({0[state]}): {0[title]}]({0[html_url]}) by "
-                "[{0[user][username]}]({0[user][html_url]})".format(result).replace("<", "&lt;").replace(">", "&gt;")
+                "[{0[user][username]}]({0[user][html_url]})".format(result)
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
             )
             labels = []
             for label in result["labels"]:
@@ -351,7 +359,10 @@ class ContinuwuityHelper(Plugin):
         try:
             self.log.info("Resolving server %s", server_name)
             result = await self.server_resolver.resolve(server_name)
-            result_str = "\n* Connection address: `{0.hostname}`\n* Host (SNI): `{0.host_header}` (`{0.sni}`)\n* Resolution step: {1}\n".format(
+            result_str = (
+                "\n* Connection address: `{0.hostname}`\n* Host (SNI): `{0.host_header}` (`{0.sni}`)\n"
+                "* Resolution step: {1}\n"
+            ).format(
                 result,
                 S2S_STEPS.get(result._step, "unrecognised step") + f" ({result._step})",
             )
@@ -599,7 +610,7 @@ class ContinuwuityHelper(Plugin):
         wk = f"https://{server_name}/.well-known/matrix/client"
         base_url = f"https://{server_name}"
         output = []
-        reaction_event = await evt.react("\u23F3")  # hourglass
+        reaction_event = await evt.react("\u23f3")  # hourglass
         try:
             self.log.debug("GET %s", wk)
             async with self.http.get(wk) as response:
@@ -715,9 +726,7 @@ class ContinuwuityHelper(Plugin):
                                 f"{CROSS} Malformed response from `{response.url}`: `versions` was not an array."
                             )
                         elif len(versions) == 0:
-                            output.append(
-                                f"{CROSS} Malformed response from `{response.url}`: `versions` was empty."
-                            )
+                            output.append(f"{CROSS} Malformed response from `{response.url}`: `versions` was empty.")
                         elif not all(isinstance(item, str) for item in versions):
                             t = set(type(v).__name__ for v in versions)
                             output.append(
@@ -741,8 +750,9 @@ class ContinuwuityHelper(Plugin):
                 f"mark the server as unavailable and refuse to continue."
             )
 
-
-        await evt.reply("THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False)
+        await evt.reply(
+            "THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False
+        )
         await self.client.redact(evt.room_id, reaction_event)
 
     @event.on(EventType.ROOM_MEMBER)
