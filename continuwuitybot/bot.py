@@ -752,6 +752,45 @@ class ContinuwuityHelper(Plugin):
                 f"mark the server as unavailable and refuse to continue."
             )
 
+        # Also check that /_continuwuity is proxied
+        try:
+            async with self.http.get(base_url + "/_continuwuity/server_version") as response:
+                if response.status != 200:
+                    output.append(
+                        f"{CROSS} Failed to fetch continuwuity site API (`{response.url}`): HTTP "
+                        f"{response.status} {response.reason}. OAuth account management may be unavailable."
+                    )
+                else:
+                    check_is_json(response, output)
+
+                    try:
+                        data = json.loads(await response.text())
+                    except Exception as e:
+                        output.append(
+                            f"{CROSS} Failed to parse response from `{response.url}`: `{e}`. "
+                            f"OAuth account management may be unavailable."
+                        )
+                    else:
+                        name = data.get("name")
+                        if name is None:
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` is not present."
+                            )
+                        elif not isinstance(name, str):
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `versions` was not a string."
+                            )
+                        elif name != "continuwuity":
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `name` was not `continuwuity`."
+                            )
+                        else:
+                            output.append(f"{CHECKMARK} Successfully contacted continuwuity site API.")
+        except Exception as e:
+            output.append(
+                f"{CROSS} Failed to fetch continuwuity site API: {e}. OAuth account management may be unavailable."
+            )
+
         await evt.reply(
             "THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False
         )
