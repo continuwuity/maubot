@@ -8,18 +8,13 @@ from urllib.parse import quote
 import aiohttp
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command, event
-from mautrix.client import SyncStream
 from mautrix.errors import MatrixRequestError
 from mautrix.types import (
     CanonicalAliasStateEventContent,
     EventType,
-    InReplyTo,
-    Membership,
     ReactionEvent,
-    RelatesTo,
     RelationType,
     RoomID,
-    StateEvent,
 )
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from resolvematrix import SERVER_NAME_REGEX, ServerDestination
@@ -795,46 +790,3 @@ class ContinuwuityHelper(Plugin):
             "THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False
         )
         await self.client.redact(evt.room_id, reaction_event)
-
-    @event.on(EventType.ROOM_MEMBER)
-    async def on_member_event(self, evt: StateEvent):
-        # TODO(nex): Have this check for mute policies instead of hardcoding servers?
-        self.messages_since_last_mute_notice += 1
-        if evt.sender.split(":", 1)[1] != "matrix.org" or self.messages_since_last_mute_notice < 20:
-            return
-        if not hasattr(evt, "source"):
-            self.log.warning("%r does not have a `source` attr")
-            return
-        # noinspection unresolved-references
-        src: SyncStream = evt.source
-        if src & SyncStream.TIMELINE != SyncStream.TIMELINE:
-            return
-        if evt.prev_content is not None:
-            if evt.prev_content.membership != Membership.LEAVE:
-                return
-        if (await self.get_canonical_alias(evt.room_id)) != "#continuwuity:continuwuity.org":
-            return
-
-        displayname = evt.content.displayname or str(evt.sender)
-        reply_id = await self.client.send_markdown(
-            evt.room_id,
-            f"Welcome {displayname}! Unfortunately, due to a large amount of spam and otherwise poor behaviour from "
-            f"users on your server, we have had to mute all users on matrix.org. If you need support with "
-            f"continuwuity, you will have to [join on another homeserver](https://servers.joinmatrix.org/) (our demo "
-            f"server, `continuwuity.rocks`, is also available). Apologies for the inconvenience!"
-            f"\n\n*Anyone can react with {WASTEBASKET} to remove this message*",
-            allow_html=False,
-            relates_to=RelatesTo(in_reply_to=InReplyTo(event_id=evt.event_id)),
-        )
-        await self.client.react(evt.room_id, reply_id, WASTEBASKET)
-        self.messages_since_last_mute_notice = 0
-
-    @event.on(EventType.ROOM_MESSAGE)
-    async def on_message_event(self, evt: MessageEvent):
-        # noinspection unresolved-references
-        src: SyncStream = evt.source
-        if src & SyncStream.TIMELINE != SyncStream.TIMELINE:
-            return
-        if (await self.get_canonical_alias(evt.room_id)) != "#continuwuity:continuwuity.org":
-            return
-        self.messages_since_last_mute_notice += 1
