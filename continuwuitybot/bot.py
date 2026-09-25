@@ -812,7 +812,7 @@ class ContinuwuityHelper(Plugin):
                             output.append(
                                 f"{CROSS} Malformed response from `{response.url}`: `issuer` was not a string."
                             )
-                        elif issuer != base_url:
+                        elif issuer.rstrip("/") != base_url:
                             output.append(
                                 f"{CROSS} OAuth issuer (`{issuer}`) does not match homeserver base URL. "
                                 "`global.well_known.client` may not be set correctly."
