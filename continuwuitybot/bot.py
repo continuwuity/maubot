@@ -3,7 +3,7 @@ import json
 import time
 import warnings
 from typing import Type
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import aiohttp
 from maubot import MessageEvent, Plugin
