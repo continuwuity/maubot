@@ -3,7 +3,7 @@ import json
 import time
 import warnings
 from typing import Type
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 from maubot import MessageEvent, Plugin
@@ -785,6 +785,42 @@ class ContinuwuityHelper(Plugin):
             output.append(
                 f"{CROSS} Failed to fetch continuwuity site API: {e}. OAuth account management may be unavailable."
             )
+
+        # Check that the OAuth issuer domain matches the well-known domain
+        try:
+            async with self.http.get(base_url + "/_matrix/client/v1/auth_metadata") as response:
+                if response.status != 200:
+                    output.append(
+                        f"{CROSS} Failed to fetch OAuth metadata (`{response.url}`): HTTP "
+                        f"{response.status} {response.reason}. OAuth account management may be unavailable."
+                    )
+                else:
+                    check_is_json(response, output)
+
+                    try:
+                        data = json.loads(await response.text())
+                    except Exception as e:
+                        output.append(
+                            f"{CROSS} Failed to parse response from `{response.url}`: `{e}`. "
+                            f"OAuth account management may be unavailable."
+                        )
+                    else:
+                        issuer = data.get("issuer")
+                        if issuer is None:
+                            output.append(f"{CROSS} Malformed response from `{response.url}`: `issuer` is not present.")
+                        elif not isinstance(issuer, str):
+                            output.append(
+                                f"{CROSS} Malformed response from `{response.url}`: `issuer` was not a string."
+                            )
+                        elif issuer != base_url:
+                            output.append(
+                                f"{CROSS} OAuth issuer (`{issuer}`) does not match homeserver base URL. "
+                                "`global.well_known.client` may not be set correctly."
+                            )
+                        else:
+                            output.append(f"{CHECKMARK} OAuth metadata is correct.")
+        except Exception as e:
+            output.append(f"{CROSS} Failed to fetch OAuth metadata: {e}. OAuth account management may be unavailable.")
 
         await evt.reply(
             "THIS COMMAND IS STILL A WORK IN PROGRESS\n\n" + "\n\n".join(output), markdown=True, allow_html=False
